@@ -1,0 +1,123 @@
+/*******************************************************
+ * RISC-V implementation
+ *   by Hogenimushi
+ *******************************************************/
+#include "const.h"
+#include "rvmodules.h"
+
+module rvdec{
+  func set any {
+    inst[6:0]== OP_IMM:      imm();
+    inst[6:0]== OP_LUI:      lui();
+    inst[6:0]== OP_AUIPC:    auipc();
+    inst[6:0]== OP_RTYPE:    rtype();
+    inst[6:0]== OP_JAL:      jal();
+    inst[6:0]== OP_JALR:     jalr();
+    inst[6:0]== OP_BRANCH:   branch();
+    inst[6:0]== OP_LOAD:     load();
+    inst[6:0]== OP_STORE:    store();
+    inst[6:0]== OP_MISC_MEM: misc_mem();
+    inst[6:0]== OP_SYSTEM:   sys();
+  }
+  func imm_i return 32#inst[31:20];
+  func imm_s return 32#{inst[31:25],inst[11:8]};
+  func imm_b return 32#{inst[31],inst[7],inst[30:25],inst[11:8],0b0};
+  func imm_u return {inst[31:12],12'0b0};
+  func imm_j return 32#{inst[31],inst[19:12], inst[20],
+				inst[30:25], inst[24:21],0b0};
+
+}
+
+module rvgpr {
+  integer i;
+  mem dat[32][32];
+  func rs1 {
+    if(adr1==0) return 32'0b0;
+    generate(i=1; i<32; i++)
+      if(adr1==i) return dat[i];
+  }
+  func rs2 {
+    if(adr2==0) return 32'0b0;
+    generate(i=1; i<32; i++)
+      if(adr2==i) return dat[i];
+  }
+  func write dat[wadr]:=wdat;
+}
+  
+module add32 {
+  func exec {
+    wire i[33];
+    i=33'a+33'b+33'cin;
+    cout=i[32];
+    return i[31:0];
+  }
+}
+
+module sft32 {
+  wire sr[32],sgn[32];
+  func_self sr_int(sr);
+  integer i;
+  variable va[32];
+  variable vs[32];
+  func sr_int {
+    va=a;
+    generate(i=0; i<5; i++){
+      if(sft[i]){
+	va = va >> (1<<i);
+	vs =  {(1<<i)'0b1,(32-(1<<i))'0b0} |(vs>>(1<<i));
+      }
+    }
+    sr=va;
+    sgn=vs;
+  }
+  func srl { sr_int(); return sr;}
+  func sra { sr_int(); return sr|sgn;}
+  func sll {
+    va=a;
+    generate(i=0; i<5; i++)
+      va = if(sft[i]) va << (1<<i) else va;
+    return va;
+  }
+}
+
+module rvalu {
+  add32 add;
+  sft32 sft;
+  func exec any {
+    sel==ALU_ADD: return add.exec(a,b,0b0);
+    sel==ALU_SUB: return add.exec(a,~b,0b1);
+    sel==ALU_SLL: return sft.sll(a,b[4:0]);
+    sel==ALU_SLT: return
+                    32'((a[31]&~b[31])
+			|(add.exec(a,~b,0b1)[31]&~a[31]&~b[31])
+			|(add.o[31]&a[31]&b[31])); 
+    sel==ALU_SLTU: return 32'(add.exec(a,~b,0b1)[15]);
+    sel==ALU_XOR: return a^b;
+    sel==ALU_SRL: return sft.srl(a,b[4:0]);
+    sel==ALU_SRA: return sft.sra(a,b[4:0]);
+    sel==ALU_OR : return a|b;
+    sel==ALU_AND: return a&b;
+  }
+}
+
+module rvcmp {
+  add32 add;
+  wire reseq,reslt,resltu;
+  func_self eq():reseq;
+  func_self lt():reslt;
+  func_self ltu():resltu;
+  func exec any {
+    sel==CMP_EQ : return eq();
+    sel==CMP_NE : return ~eq();
+    sel==CMP_LT : return lt();
+    sel==CMP_GE : return ~lt();
+    sel==CMP_LTU: return ltu();
+    sel==CMP_GEU: return ~ltu();
+  }
+  func eq  return ~|add.exec(a,~b,0b1);
+  func ltu return add.exec(a,~b,0b1).cout;
+  func lt  return
+      (a[31]&~b[31])
+      |(add.exec(a,~b,0b1)[31]&~a[31]&~b[31])
+      |(add.o[31]&a[31]&b[31]); 
+}

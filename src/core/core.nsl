@@ -1,0 +1,82 @@
+/*******************************************************
+ * RISC-V implementation
+ *   by Hogenimushi
+ *******************************************************/
+#include "const.h"
+#include "rvmodules.h"
+#include "rvcore.h"
+
+struct inst_base{
+  funct7[31:25]; rs2[24:20]; rs1[19:15]; funct3[14:12]; rd[11:7]; opc[6:0];
+};
+
+module rvcore {
+  rvalu alu;
+  rvgpr gpr;
+  rvcmp cmp;
+  rvdec dec;
+  
+  reg pc[32],mar[32],mreg[5];
+  inst_base reg ir;
+  wire ipc[32],nxtpc[32];
+  wire nreg[5], nmar[32];
+
+  proc_name ifetch(pc);
+  proc_name exec(ir);
+  proc_name mstore(mreg,mar);
+  proc_name mstore2();
+  proc_name mload(mreg,mar);
+
+  func_self inst_req(ipc);
+  func_self load_req(nreg,nmar);
+  
+  func start inst_req(32'0b0);
+  func inst_req par { inst_adr(ipc); ifetch(ipc);}  
+  func load_req par { mem_adr(nmar); mload(nreg,nmar); }
+  proc ifetch   par { inst_read(); if(inst_rdy) exec(inst); }
+
+  proc exec par {
+    wire pc4[32];
+    dec.set(ir);
+    pc4=pc+32'd4;
+    // next pc
+    any {
+      dec.jal:  nxtpc=pc+dec.imm_u();
+      dec.jalr: nxtpc=pc+dec.imm_j()+gpr.rs1(ir.rs1);
+      dec.branch:{
+	if(cmp.exec(gpr.rs1(ir.rs1),gpr.rs2(ir.rs2),ir.funct3))
+	  nxtpc=pc+dec.imm_b();}
+      else: nxtpc=pc4;
+    }
+    // register/ALU operations
+    func dec.imm    gpr.write(ir.rd, alu.exec(gpr.rs1(ir.rs1),dec.imm_i()    ,{ir[30],ir.funct3})); 
+    func dec.lui    gpr.write(ir.rd, alu.exec(gpr.rs1(ir.rs1),dec.imm_u()    ,ALU_ADD  ));
+    func dec.auipc  gpr.write(ir.rd, alu.exec(pc             ,dec.imm_u()    ,ALU_ADD  ));
+    func dec.rtype  gpr.write(ir.rd, alu.exec(gpr.rs1(ir.rs1),gpr.rs2(ir.rs2),{ir[30],ir.funct3}));
+    func dec.jal    gpr.write(ir.rd, pc4);  
+    func dec.jalr   gpr.write(ir.rd, pc4);
+    func dec.load   load_req(ir.rd,alu.exec(gpr.rs1(ir.rs1),dec.imm_i(),ALU_ADD));
+    func dec.store  mstore  (ir.rd,alu.exec(gpr.rs1(ir.rs1),dec.imm_s(),ALU_ADD));
+    func dec.misc_mem {}
+    func dec.sys {}
+    //next inst
+    if(~(dec.load|dec.store)) {inst_req(nxtpc); wb();}
+    finish();
+  }
+
+  /* proc mstore(regnum,mar) operation */ 
+  proc mstore par { 
+    mem_write(mar,gpr.rs2(mreg)); 
+    if(mem_rdy) { mstore2(); finish(); wb();}
+  }
+  proc mstore2 par {inst_req(pc);finish();}
+
+  proc mload par {
+    mem_read();
+    if(mem_rdy) {
+      gpr.write(mreg,dati); 
+      inst_req(pc); finish(); wb(); 
+    }
+  }
+}
+
