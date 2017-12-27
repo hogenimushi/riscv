@@ -3,8 +3,8 @@
  *   by Hogenimushi
  *******************************************************/
 #include "const.h"
-#include "rvmodules.h"
-#include "rvcore.h"
+#include "modules.h"
+#include "core.h"
 
 struct inst_base{
   funct7[31:25]; rs2[24:20]; rs1[19:15]; funct3[14:12]; rd[11:7]; opc[6:0];

@@ -3,7 +3,7 @@
  *   by Hogenimushi
  *******************************************************/
 #include "const.h"
-#include "rvmodules.h"
+#include "modules.h"
 
 module rvdec{
   func set any {
